@@ -1,0 +1,326 @@
+---
+title: "How to build and run a landscape genetic simulation"
+subtitle: "A tool for simulation-based final projects"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 2
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+This notebook shows how to draw landscapes, choose species parameters, run a
+Geonomics simulation, and retrieve genetic and spatial data for your own analyses.
+It is a reusable workflow for a simulation-based final project. You supply the
+research question, landscape design, parameter comparisons, and analyses.
+
+The workflow is **draw → configure → simulate → inspect → analyze**. Shiny is
+used only for drawing. Geonomics runs the simulation in Python; you work with
+its inputs and outputs in R.
+
+## 1. Open the project and load the tools
+
+On DataHub, open `Landscape_Simulation_HowTo.Rproj` in RStudio, then open this
+Rmd. Keep `support/` beside the Rmd. Opening the project sets the working directory
+so the relative file paths below work.
+
+Run chunks individually, in order, for your first pass. Drawing requires your
+interaction, so do not start with Knit or Run All.
+
+```{r setup}
+knitr::opts_chunk$set(echo=TRUE, cache=FALSE, fig.width=10, fig.height=7)
+
+# If needed, install these once in the R console:
+# install.packages(c("shiny", "jsonlite", "knitr", "rmarkdown"))
+
+source("support/notebook_helpers.R")
+Sys.setenv(EVODOODLE_PYTHON="/srv/conda/envs/notebook/bin/python")
+```
+
+These helpers use DataHub's Python environment with Geonomics already installed.
+You do not need to import Python into R with reticulate or install the Python
+Evodoodle package.
+
+## 2. Draw three landscape layers
+
+Each layer is a matrix with one number per cell. All three layers describe the
+same area and must have the same dimensions.
+
+| Layer | Role | Meaning of the values |
+|:--|:--|:--|
+| Carrying capacity | Spatial variation in population capacity | 0 = no capacity; 1 = maximum relative capacity |
+| Connectivity | Surface used to guide movement | Low values = low connectivity; high values = high connectivity |
+| Environment | Local optimum for the selected trait | 0 to 1 = different local trait optima, rather than better or worse habitat |
+
+In this model, connectivity guides movement directions; a zero cell is not a
+guarantee of an impermeable barrier. For a project about barriers, distinguish
+movement preference from habitat capacity and check that the simulation produces
+the intended movement pattern.
+
+The next chunk opens all three maps together. Select **0, 0.25, 0.5, 0.75, or 1**
+below a map, then click or drag to paint. Brush selections are independent for each
+map. Fresh maps begin at 1 everywhere. Click **Save all and return to notebook**
+when all layers are ready.
+
+```{r draw-landscapes}
+landscapes <- draw_landscapes(
+  d = 10,
+  title = "Draw your project landscapes",
+  file = "landscapes/project_landscapes.rds"
+)
+```
+
+`d = 10` creates a 10 × 10 grid. After Save, the editor stops; a disconnected
+editor page is normal. Return to RStudio. The object `landscapes` is a named list
+of three R matrices, and a copy is saved on disk.
+
+```{r inspect-landscapes}
+carrying_capacity <- landscapes$carrying_capacity
+connectivity <- landscapes$connectivity
+environment <- landscapes$environment
+
+plot_landscapes(carrying_capacity, connectivity, environment)
+dim(carrying_capacity)
+```
+
+To reopen and edit your maps, use the following optional chunk. It edits a copy
+and saves it under a new filename. Enable the chunk or run its code manually.
+
+```{r edit-landscapes, eval=FALSE}
+landscapes_edited <- draw_landscapes(
+  initial = landscapes,
+  title = "Edit a copy of your landscapes",
+  file = "landscapes/project_landscapes_edited.rds"
+)
+```
+
+You can also inspect or edit a matrix directly in R. For example,
+`carrying_capacity[3, 5]` is the cell in row 3, column 5. Rows increase downward
+from the top of the maps; columns increase to the right. To use an edited set in
+a simulation, pass that set's matrices to `run_geonomics()`.
+
+## 3. Construct the parameters object
+
+`gnx_parameters()` builds a named R list containing the settings exposed by this
+wrapper. Edit its arguments before running a simulation. For an interpretable
+comparison, first change one parameter or landscape feature at a time.
+
+```{r choose-parameters}
+params <- gnx_parameters(
+  phi = 0.05,               # Selection strength: 0 to 1
+  n_loci = 1,               # Loci controlling the selected trait: 1 to 100
+  K_factor = 5,             # Capacity per cell at capacity-layer value 1
+  movement_distance = 0.5,  # Movement-distance distribution parameter (>0)
+  mating_radius = 4,        # Maximum mate-search distance in cell widths (>0)
+  seed = 154                # Positive integer random seed
+)
+```
+
+| Argument | How to interpret or change it |
+|:--|:--|
+| `phi` | Larger values strengthen selection toward the local environmental optimum; 0 removes selection on this trait. |
+| `n_loci` | Number of loci underlying the selected trait. This is separate from the total genomic loci. |
+| `K_factor` | Multiplies the carrying-capacity layer. A cell with value 0.5 and `K_factor = 5` has nominal capacity 2.5; realized abundance fluctuates. |
+| `movement_distance` | Changes the movement-distance distribution; larger values increase its scale in this template. It is not a guaranteed distance for each individual. |
+| `mating_radius` | Sets the distance within which individuals can find mates. |
+| `seed` | Controls random number generation. Use different seeds for independent replicate runs. |
+
+The template uses **1,000 total genomic loci** and **500 starting individuals
+before burn-in**. Burn-in lets the demographic population settle before genomic
+initialization and the main simulation. The population present at main step 0 can
+therefore differ from 500. The number of individuals is not held constant.
+These two template settings are not arguments to `gnx_parameters()`.
+
+Display the settings you are about to use. The table reads the two fixed values
+from the actual template so they cannot silently disagree with the file.
+
+```{r display-parameters}
+template <- jsonlite::fromJSON("support/model_params.json", simplifyVector=FALSE)
+species_settings <- template$comm$species$spp_0
+
+parameter_table <- data.frame(
+  Parameter = c(
+    "Starting individuals (before burn-in)", "Total genomic loci",
+    "Selection strength", "Loci controlling the selected trait",
+    "Carrying-capacity multiplier", "Movement distance",
+    "Mating radius", "Random seed"
+  ),
+  Value = c(
+    species_settings$init$N, species_settings$gen_arch$L,
+    params$phi, params$n_loci, params$K_factor,
+    params$movement_distance, params$mating_radius, params$seed
+  )
+)
+knitr::kable(parameter_table, row.names=FALSE)
+```
+
+For example, `phi = 0.1` increases selection strength relative to 0.05;
+`K_factor = 3` lowers nominal capacity relative to 5. Rerun the parameter and
+table chunks after edits. Existing saved simulations retain their original inputs.
+
+## 4. Submit a model run to Geonomics
+
+This chunk passes the three matrices and `params` to the Python runner. It
+constructs a new model, completes demographic burn-in, and then runs two
+consecutive 100-step stages of the **same population**.
+
+```{r run-simulation}
+mod <- run_geonomics(
+  carrying_capacity = carrying_capacity,
+  connectivity = connectivity,
+  environment = environment,
+  params = params,
+  steps = c(100, 100),
+  name = "project_example"
+)
+```
+
+Wait for the chunk to finish. RStudio will be busy; Shiny is already closed.
+Run one simulation at a time. The console prints the path to the Python log.
+The helper waits for Python and then returns a small R result object, `mod`.
+It contains saved data and paths, not a live Python model.
+
+`steps = c(100, 100)` saves stages at main steps **0, 100, and 200**. Step 0 is
+after burn-in. Use `steps = 200` for only stages 0 and 1 (steps 0 and 200), or
+`steps = c(50, 50, 50)` for stages 0 through 3 (steps 0, 50, 100, 150).
+
+Each new `run_geonomics()` call constructs a fresh population. It does not
+continue a previous `mod`. Put all successive stages of a run in `steps`.
+Names may contain letters, numbers, underscores, and hyphens. Use descriptive,
+unique names to keep scenarios and replicates identifiable.
+
+```{r run-summary}
+mod$folder
+knitr::kable(mod$stages, row.names=FALSE)
+```
+
+The summary reports population size and mean observed heterozygosity across all
+loci, including fixed loci, at each saved stage.
+
+## 5. Inspect the simulation
+
+```{r plot-initial}
+plot_popgen(mod, stage=0)
+```
+
+```{r plot-final}
+plot_popgen(mod, stage=2)
+```
+
+The four panels show genetic PCA, individuals on the landscape colored by their
+PC scores, individual heterozygosity, and phenotype against the local environment.
+The last panel uses the same scale for phenotype and environment. PCA is fitted
+separately at each stage: signs and RGB colors can change, so do not interpret a
+color change between stages alone as a biological change. Quantitative analyses
+should accompany visual comparisons in a final project.
+
+## 6. Retrieve VCFs and coordinates
+
+The model saves genetic and spatial data at every stage, not just the final one.
+
+| File | Contents |
+|:--|:--|
+| `stage_XX.vcf` | Diploid genotypes for all individuals and all loci, including fixed sites |
+| `stage_XX_coordinates.csv` | Individual ID and x/y coordinates |
+| `stage_XX_individuals.csv` | ID, coordinates, phenotype, and observed heterozygosity |
+| `stage_XX_dosage.csv.gz` | Individual-by-locus allele dosage matrix used by the plotting helpers |
+| `stages.csv` | Stage numbers, cumulative main steps, abundance, and mean heterozygosity |
+| `result.rds` | Saved R result object for reopening the run |
+
+For this two-stage example, `stage_02` is the final population at step 200.
+Determine the final stage from the summary rather than hard-coding it in reusable
+project scripts:
+
+```{r retrieve-outputs}
+final_stage <- max(mod$stages$stage)
+prefix <- file.path(mod$folder, sprintf("stage_%02d", final_stage))
+
+vcf_file <- paste0(prefix, ".vcf")
+coordinates <- read.csv(paste0(prefix, "_coordinates.csv"))
+individuals <- read.csv(paste0(prefix, "_individuals.csv"))
+
+vcf_file
+head(coordinates)
+head(individuals)
+```
+
+The coordinates are in **simulation grid units**, not longitude/latitude. Match
+individuals by sample ID when combining VCFs and coordinates, rather than assuming
+their orders are identical. ID values identify individuals; they do not guarantee
+that the same individuals survive across stages. Keep each stage's paired files
+together. Fixed loci are retained in the VCF; filter them when your chosen analysis
+requires polymorphic loci.
+
+Use the Files pane in RStudio to navigate to `mod$folder` and download files with
+Export, or read them directly into the R tools you already use. For example, if
+you choose to use **vcfR**, the following optional code imports the VCF:
+
+```{r import-vcf, eval=FALSE}
+# Install vcfR once if needed: install.packages("vcfR")
+vcf <- vcfR::read.vcfR(vcf_file, verbose=FALSE)
+```
+
+## 7. Design comparisons and replicates
+
+For a project, define a response (for example, diversity, differentiation, or
+trait–environment matching), the factor you will manipulate, and the conditions
+you will hold constant. Use several independent seeds per treatment to distinguish
+a treatment effect from stochastic variation. Keep the same run length and output
+stages when comparing treatments unless time itself is the factor of interest.
+
+Below is an optional pattern for three replicates of the current landscape. Enable
+it only when you are ready to run three additional full simulations. Each finishes
+before the next starts; choose new names when changing the design.
+
+```{r replicate-example, eval=FALSE}
+seeds <- c(201, 202, 203)
+replicates <- lapply(seeds, function(s) {
+  replicate_params <- gnx_parameters(
+    phi=params$phi, n_loci=params$n_loci, K_factor=params$K_factor,
+    movement_distance=params$movement_distance,
+    mating_radius=params$mating_radius, seed=s
+  )
+  run_geonomics(
+    carrying_capacity, connectivity, environment,
+    params=replicate_params, steps=c(100,100),
+    name=paste0("baseline_seed_",s), rerun=TRUE
+  )
+})
+```
+
+To compare landscapes, draw and save a second named set, then pass its matrices
+to another run with the same biological parameters and an appropriate seed plan.
+Record the landscape files, parameter settings, seeds, run length, and analyses
+so someone else can reproduce your project.
+
+## 8. Save and reopen your work
+
+Drawings are already saved under `landscapes/`; each run is saved under `runs/`.
+Keep those folders with your project locally and in your submission. The included
+`.gitignore` excludes them from Git to keep generated data out of the code repository;
+use your course's submission method to share the data.
+
+These optional commands restore existing objects without drawing or simulating:
+
+```{r reopen-example, eval=FALSE}
+landscapes <- readRDS("landscapes/project_landscapes.rds")
+mod <- readRDS("runs/project_example/result.rds")
+plot_popgen(mod)  # Defaults to the last saved stage
+```
+
+Rerunning a drawing chunk normally opens the editor again; `redraw=FALSE` reuses
+its saved file. Rerunning a simulation chunk interactively normally launches a new
+run in a new folder; `rerun=FALSE` reuses the latest saved result for that name.
+Reuse loads old inputs and outputs: it does not apply edits to your current matrices
+or parameters. On a repeat run, `mod$folder` identifies the actual numbered folder.
+
+After completing the interactive chunks, Knit/Preview reuses your own saved
+landscapes and simulation results. Optional chunks marked `eval=FALSE` are shown
+but not executed when rendering. Keep them disabled for a simple introductory run.
+
+If a simulation reports an error, read the log named in the console. If a population
+goes extinct, review habitat capacity and biological settings. Begin with the
+10 × 10 grid, 1,000 loci, and default density that have been tested on DataHub;
+larger populations or genomes increase computational demand. The VCF export is a
+new addition and should be checked with a fresh run in your DataHub environment.
