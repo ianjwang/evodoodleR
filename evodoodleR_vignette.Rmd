@@ -133,6 +133,8 @@ initialization and the main simulation. The population present at main step 0 ca
 therefore differ from 500. The number of individuals is not held constant.
 These two template settings are not arguments to `gnx_parameters()`.
 
+We recommend starting with no more than 1,000 loci if working on DataHub.
+
 Display the settings you are about to use. The table reads the two fixed values
 from the actual template so they cannot silently disagree with the file.
 
