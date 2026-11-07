@@ -10,37 +10,38 @@ output:
     toc_depth: 2
 ---
 
-This notebook shows how to draw landscapes, choose species parameters, run a
-Geonomics simulation, and retrieve genetic and spatial data for your own analyses.
-It is a reusable workflow for a simulation-based final project. You supply the
+This notebook shows how to draw landscapes, choose model parameters, run a
+Geonomics simulation, and retrieve genomic and spatial data for your own analyses.
+It is a reusable workflow for a simulation-based project. You supply the
 research question, landscape design, parameter comparisons, and analyses.
 
-The workflow is **draw → configure → simulate → inspect → analyze**. Shiny is
-used only for drawing. Geonomics runs the simulation in Python; you work with
-its inputs and outputs in R.
+The workflow is **draw → configure → simulate → inspect → analyze**. The `shiny` package
+is used only for drawing the landscapes. Geonomics runs the simulation in Python; you 
+work with its inputs and outputs in R using the interface below.
 
 ## 1. Open the project and load the tools
 
-On DataHub, open `Landscape_Simulation_HowTo.Rproj` in RStudio, then open this
-Rmd. Keep `support/` beside the Rmd. Opening the project sets the working directory
-so the relative file paths below work.
+On DataHub, open `evodoodleR_vignette.Rproj` in RStudio, then open the `evodoodleR_vignette.Rmd`. 
+Keep `support/` beside the Rmd. Opening the project sets the working directory so the relative 
+file paths below work.
 
-Run chunks individually, in order, for your first pass. Drawing requires your
-interaction, so do not start with Knit or Run All.
+Run chunks individually, in order, for your first pass. Drawing requires your interaction, 
+so do not start with Knit or Run All.
 
 ```{r setup}
 knitr::opts_chunk$set(echo=TRUE, cache=FALSE, fig.width=10, fig.height=7)
 
 # If needed, install these once in the R console:
-# install.packages(c("shiny", "jsonlite", "knitr", "rmarkdown"))
+# install.packages(c("shiny", "jsonlite"))
 
 source("support/notebook_helpers.R")
 Sys.setenv(EVODOODLE_PYTHON="/srv/conda/envs/notebook/bin/python")
 ```
 
 These helpers use DataHub's Python environment with Geonomics already installed.
-You do not need to import Python into R with reticulate or install the Python
-Evodoodle package.
+You should not need to do any other setup to run evodoodleR on DataHub. However,
+if you are working on a personal computer, then you will need to set the Python
+environment and install Geonomics.
 
 ## 2. Draw three landscape layers
 
@@ -102,9 +103,9 @@ a simulation, pass that set's matrices to `run_geonomics()`.
 
 ## 3. Construct the parameters object
 
-`gnx_parameters()` builds a named R list containing the settings exposed by this
-wrapper. Edit its arguments before running a simulation. For an interpretable
-comparison, first change one parameter or landscape feature at a time.
+The `gnx_parameters()` function builds a named R list containing the settings 
+exposed by this wrapper. Edit its arguments before running a simulation. For an 
+interpretable comparison, first change one parameter or landscape feature at a time.
 
 ```{r choose-parameters}
 params <- gnx_parameters(
@@ -156,7 +157,7 @@ knitr::kable(parameter_table, row.names=FALSE)
 ```
 
 For example, `phi = 0.1` increases selection strength relative to 0.05;
-`K_factor = 3` lowers nominal capacity relative to 5. Rerun the parameter and
+`K_factor = 3` lowers nominal carrying capacity relative to 5. Rerun the parameter and
 table chunks after edits. Existing saved simulations retain their original inputs.
 
 ## 4. Submit a model run to Geonomics
@@ -181,6 +182,11 @@ Run one simulation at a time. The console prints the path to the Python log.
 The helper waits for Python and then returns a small R result object, `mod`.
 It contains saved data and paths, not a live Python model.
 
+You can check the status of the simulation using the `simulation_status()` function.
+```{r check-status}
+simulation_status(mod)
+```
+
 `steps = c(100, 100)` saves stages at main steps **0, 100, and 200**. Step 0 is
 after burn-in. Use `steps = 200` for only stages 0 and 1 (steps 0 and 200), or
 `steps = c(50, 50, 50)` for stages 0 through 3 (steps 0, 50, 100, 150).
@@ -189,6 +195,8 @@ Each new `run_geonomics()` call constructs a fresh population. It does not
 continue a previous `mod`. Put all successive stages of a run in `steps`.
 Names may contain letters, numbers, underscores, and hyphens. Use descriptive,
 unique names to keep scenarios and replicates identifiable.
+
+Once you have confirmed that the geonomics simulation has finished running, you can proceed.
 
 ```{r run-summary}
 mod$folder
@@ -200,10 +208,12 @@ loci, including fixed loci, at each saved stage.
 
 ## 5. Inspect the simulation
 
+Plot after burn-in.
 ```{r plot-initial}
 plot_popgen(mod, stage=0)
 ```
 
+Plot the final stage.
 ```{r plot-final}
 plot_popgen(mod, stage=2)
 ```
