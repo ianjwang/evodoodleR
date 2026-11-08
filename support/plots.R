@@ -24,14 +24,23 @@ read_snapshot <- function(folder, stage) {
          100*head(c(pmax(eig$values, 0), 0, 0), 2)/sum(pmax(eig$values, 0)) else c(0,0))
 }
 
+# Match the editor's linear RGB interpolation; values always use the full 0–1 scale.
+landscape_colors <- function(values, anchors) {
+  channels <- grDevices::colorRamp(anchors, space="rgb")(pmin(1,pmax(0,values)))
+  grDevices::rgb(round(channels), maxColorValue=255)
+}
+
 plot_snapshot <- function(snapshot, layers, steps) {
-  old <- par(mfrow=c(2,2), mar=c(3,3,3,1), oma=c(0,0,2,0))
+  old <- par(mfrow=c(2,2), mar=c(5,3,3,1), oma=c(0,0,2,0))
   on.exit(par(old))
   dat <- snapshot$individuals
   plot(snapshot$pcs[,1], snapshot$pcs[,2], pch=21, bg=snapshot$colors,
        xlab=sprintf("PC1 (%.1f%%)", snapshot$variance[1]),
        ylab=sprintf("PC2 (%.1f%%)", snapshot$variance[2]), main="Genetic PCA")
-  palette <- hcl.colors(100, "Viridis")
+  environment_anchors <- c("#542788","#998ec3","#f7f7f7","#f1a340","#b35806")
+  phenotype_palette <- landscape_colors(seq(0,1,length.out=1025),environment_anchors)
+  het_anchors <- hcl.colors(256,"Viridis")
+  het_palette <- landscape_colors(seq(0,1,length.out=1025),het_anchors)
   paint_map <- function(layer, colors, title, background=gray.colors(100, start=0.97, end=0.55)) {
     nr <- nrow(layer); nc <- ncol(layer)
     plot(NA, xlim=c(0,nc), ylim=c(nr,0), asp=1, axes=FALSE,
@@ -41,14 +50,23 @@ plot_snapshot <- function(snapshot, layers, steps) {
     points(dat$x, dat$y, pch=21, bg=colors, cex=0.8)
     box()
   }
+  # A continuous legend below the map, with absolute values (never rescaled per run).
+  colorbar <- function(palette, label) {
+    edges <- grconvertX(seq(0.15,0.85,length.out=length(palette)+1),"npc","user")
+    ys <- grconvertY(c(-0.12,-0.06),"npc","user")
+    rect(head(edges,-1),ys[1],tail(edges,-1),ys[2],col=palette,border=NA,xpd=NA)
+    rect(edges[1],ys[1],tail(edges,1),ys[2],border="#555555",xpd=NA)
+    text(grconvertX(c(0.15,0.5,0.85),"npc","user"),
+         grconvertY(-0.19,"npc","user"),labels=c("0","0.5","1"),cex=0.7,xpd=NA)
+    text(grconvertX(0.5,"npc","user"),grconvertY(-0.28,"npc","user"),
+         labels=label,cex=0.7,xpd=NA)
+  }
   paint_map(layers$capacity, snapshot$colors, "Genetic PCA on landscape")
-  het <- pmin(1, pmax(0, dat$heterozygosity))
-  paint_map(layers$connectivity, palette[1+floor(99*het)], "Individual heterozygosity")
-  legend("bottomleft", legend=c("0","0.5","1"), fill=palette[c(1,50,100)],
-         horiz=TRUE, bty="n", cex=0.7)
-  phenotype <- pmin(1, pmax(0, dat$phenotype))
-  paint_map(layers$environment, palette[1+floor(99*phenotype)], "Phenotype", background=palette)
-  legend("bottomleft", legend=c("0","0.5","1"), fill=palette[c(1,50,100)],
-         horiz=TRUE, bty="n", cex=0.7)
+  paint_map(layers$connectivity,landscape_colors(dat$heterozygosity,het_anchors),
+            "Individual heterozygosity")
+  colorbar(het_palette,"Observed heterozygosity")
+  paint_map(layers$environment,landscape_colors(dat$phenotype,environment_anchors),
+            "Phenotype and environment",background=phenotype_palette)
+  colorbar(phenotype_palette,"Phenotype / environmental optimum")
   mtext(sprintf("Step %d | %d individuals", steps, nrow(dat)), outer=TRUE)
 }
